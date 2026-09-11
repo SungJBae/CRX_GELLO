@@ -1,0 +1,46 @@
+# GELLO -> FANUC CRX-10iA/L teleoperation
+# Replace the gello_leader block with the output of:
+#   ros2 run gello_crx gello_calibrate --port /dev/ttyUSB0
+
+/**/gello_leader:
+  ros__parameters:
+    port: /dev/ttyUSB0
+    baudrate: 57600
+    joint_ids: [1, 2, 3, 4, 5, 6]
+    trigger_id: 7
+    rate: 100.0
+    # PLACEHOLDERS - calibrate before connecting the robot.
+    joint_offsets: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    joint_signs: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    trigger_open_counts: 2048
+    trigger_closed_counts: 2900
+
+/**/gello_teleop:
+  ros__parameters:
+    control_rate: 100.0
+    # Use 0.10 for first motion on real hardware, raise once it feels right.
+    velocity_scale: 0.25
+    filter_cutoff_hz: 5.0
+    sync_tolerance_rad: 0.05
+    sync_velocity_scale: 0.05
+    leader_timeout_s: 0.2
+    robot_timeout_s: 0.5
+    # Enable is a heartbeat: motion stops this long after it goes quiet.
+    enable_timeout_s: 0.5
+    position_margin_deg: 5.0
+    joint_prefix: ""
+    command_topic: /forward_position_controller/commands
+    joint_states_topic: /joint_states
+    leader_topic: /gello_leader/leader_states
+
+/**/gello_gripper:
+  ros__parameters:
+    action_name: /robotiq_gripper_controller/gripper_cmd
+    trigger_topic: /gello_leader/trigger
+    # 2F-140 finger_joint in radians under ros2_robotiq_gripper.
+    # If your stack commands stroke in metres, use 0.140 open / 0.0 closed.
+    open_position: 0.0
+    closed_position: 0.7
+    max_effort: 40.0
+    deadband: 0.02
+    min_period_s: 0.1
