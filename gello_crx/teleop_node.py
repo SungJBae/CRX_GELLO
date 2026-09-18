@@ -28,6 +28,7 @@ from enum import Enum
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64MultiArray, String
 
@@ -43,6 +44,24 @@ DEFAULT_VEL_LIMITS = [
     np.deg2rad(180.0),
 ]
 DEFAULT_POS_LIMITS = [179.9, 179.9, 270.0, 190.0, 179.9, 225.0]
+
+# QoS for real-time sensor streams: best-effort, volatile, keep only the
+# latest sample so the control loop never processes stale data.
+_SENSOR_QOS = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    durability=DurabilityPolicy.VOLATILE,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+)
+
+# QoS for the command publisher: reliable (the controller must receive every
+# setpoint) but depth-1 so a slow subscriber never queues outdated commands.
+_CMD_QOS = QoSProfile(
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.VOLATILE,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+)
 
 
 class State(Enum):
@@ -104,14 +123,14 @@ class TeleopNode(Node):
         self._command: np.ndarray | None = None
 
         self._pub_cmd = self.create_publisher(
-            Float64MultiArray, str(g("command_topic").value), 10
+            Float64MultiArray, str(g("command_topic").value), _CMD_QOS,
         )
         self._pub_state = self.create_publisher(String, "~/state", 10)
         self.create_subscription(
-            JointState, str(g("leader_topic").value), self._on_leader, 10
+            JointState, str(g("leader_topic").value), self._on_leader, _SENSOR_QOS,
         )
         self.create_subscription(
-            JointState, str(g("joint_states_topic").value), self._on_robot, 10
+            JointState, str(g("joint_states_topic").value), self._on_robot, _SENSOR_QOS,
         )
         self.create_subscription(Bool, "~/enable", self._on_enable, 10)
 
@@ -197,7 +216,7 @@ class TeleopNode(Node):
             # Start the command where the robot actually is, never where the
             # leader is, so the first published value is a no-op.
             self._command = self._robot.copy()
-            self._filtered = self._leader.copy()
+            self._filtered = self._robot.copy()
             self._state = State.SYNCING
             err = float(np.max(np.abs(target - self._robot)))
             self.get_logger().info(
@@ -210,7 +229,11 @@ class TeleopNode(Node):
             step = self._vel_limits * self._sync_scale * self._dt
             delta = np.clip(target - self._command, -step, step)
             self._command = self._command + delta
-            self._filtered = self._leader.copy()
+            # Run the low-pass filter during SYNCING so it converges
+            # before the SYNCING -> ENGAGED transition, avoiding a jerk.
+            self._filtered = (
+                1.0 - self._alpha
+            ) * self._filtered + self._alpha * self._leader
             if float(np.max(np.abs(target - self._command))) < self._sync_tol:
                 self._state = State.ENGAGED
                 self.get_logger().info("-> ENGAGED")

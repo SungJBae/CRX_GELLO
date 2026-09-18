@@ -5,7 +5,7 @@
 /**/gello_leader:
   ros__parameters:
     port: /dev/ttyUSB0
-    baudrate: 57600
+    baudrate: 2000000
     joint_ids: [1, 2, 3, 4, 5, 6]
     trigger_id: 7
     rate: 100.0
