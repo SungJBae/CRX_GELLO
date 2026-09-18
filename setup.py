@@ -27,6 +27,7 @@ setup(
             "gello_teleop = gello_crx.teleop_node:main",
             "gello_gripper = gello_crx.gripper_node:main",
             "gello_calibrate = gello_crx.calibrate:main",
+            "gello_set_baudrate = gello_crx.set_baudrate:main",
         ],
     },
 )

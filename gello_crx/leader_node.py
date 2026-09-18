@@ -11,6 +11,7 @@ from __future__ import annotations
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
 
@@ -22,13 +23,22 @@ from gello_crx.dynamixel_bus import (
 
 JOINT_NAMES = ["J1", "J2", "J3", "J4", "J5", "J6"]
 
+# Publish with best-effort / volatile / depth-1 so the teleop subscriber
+# always sees the freshest sample without queuing delay.
+_SENSOR_QOS = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    durability=DurabilityPolicy.VOLATILE,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+)
+
 
 class LeaderNode(Node):
     def __init__(self) -> None:
         super().__init__("gello_leader")
 
         self.declare_parameter("port", "/dev/ttyUSB0")
-        self.declare_parameter("baudrate", 57600)
+        self.declare_parameter("baudrate", 2000000)
         self.declare_parameter("joint_ids", [1, 2, 3, 4, 5, 6])
         self.declare_parameter("trigger_id", 7)
         self.declare_parameter("joint_offsets", [0.0] * 6)
@@ -61,12 +71,20 @@ class LeaderNode(Node):
         self._bus = DynamixelBus(port, ids, baud)
         self.get_logger().info(f"leader bus open on {port} @ {baud}, ids {ids}")
 
-        self._pub_joints = self.create_publisher(JointState, "~/leader_states", 10)
-        self._pub_trigger = self.create_publisher(Float64, "~/trigger", 10)
+        self._pub_joints = self.create_publisher(
+            JointState, "~/leader_states", _SENSOR_QOS,
+        )
+        self._pub_trigger = self.create_publisher(
+            Float64, "~/trigger", _SENSOR_QOS,
+        )
         self._consecutive_errors = 0
         self.create_timer(1.0 / rate, self._tick)
 
     def _tick(self) -> None:
+        # Capture the timestamp BEFORE the bus read so it reflects when the
+        # servo positions were sampled, not when we finished reading them.
+        stamp = self.get_clock().now().to_msg()
+
         try:
             counts = self._bus.read_counts()
         except DynamixelBusError as exc:
@@ -83,7 +101,7 @@ class LeaderNode(Node):
         mapped = self._signs * (raw - self._offsets)
 
         msg = JointState()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.stamp = stamp
         msg.name = JOINT_NAMES
         msg.position = [float(v) for v in mapped]
         self._pub_joints.publish(msg)
